@@ -1,3 +1,11 @@
+class TestsFailedException(Exception):
+    pass
+
+
+class DeploymentFailedException(Exception):
+    pass
+
+
 class Pipeline:
     def __init__(self, config, emailer, log):
         self.config = config
@@ -6,42 +14,40 @@ class Pipeline:
 
     def run(self, project):
 
-        if project.has_tests():
-            if "success" == project.run_tests():
-                self.log.info("Tests passed")
-                tests_passed = True
-            else:
-                self.log.error("Tests failed")
-                tests_passed = False
-        else:
+        try:
+            self.run_test_if_test(project)
+            self.deploy_project(project)
+            self.send_email_summary("Deployment completed successfully")
+        except TestsFailedException:
+            self.send_email_summary("Tests failed")
+        except DeploymentFailedException:
+            self.send_email_summary("Deployment failed")
+
+    def deploy_project(self, project):
+        if "success" != project.deploy():
+            self.log.error("Deployment failed")
+            raise DeploymentFailedException
+
+        self.log.info("Deployment successful")
+
+    def run_test_if_test(self, project):
+        if not project.has_tests():
             self.log.info("No tests")
-            tests_passed = True
+            return
 
-        if tests_passed:
-            if "success" == project.deploy():
-                self.log.info("Deployment successful")
-                deploy_successful = True
-            else:
-                self.log.error("Deployment failed")
-                deploy_successful = False
-        else:
-            deploy_successful = False
+        self.run_test(project)
 
-        summary = self.create_summary(deploy_successful, tests_passed)
-        self.send_email_summary(summary)
+    def run_test(self, project):
+        if "success" != project.run_tests():
+            self.log.error("Tests failed")
+            raise TestsFailedException
+
+        self.log.info("Tests passed")
 
     def send_email_summary(self, summary):
-        if self.config.send_email_summary():
-            self.log.info("Sending email")
-            self.emailer.send(summary)
-        else:
+        if not self.config.send_email_summary():
             self.log.info("Email disabled")
+            return
 
-    def create_summary(self, deploy_successful, tests_passed):
-        if tests_passed:
-            if deploy_successful:
-                return "Deployment completed successfully"
-            else:
-                return "Deployment failed"
-        else:
-            return "Tests failed"
+        self.log.info("Sending email")
+        self.emailer.send(summary)
